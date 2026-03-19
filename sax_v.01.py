@@ -215,6 +215,7 @@ finally:
     cap.release()
     cv2.destroyAllWindows()
     hands.close()
+  
     face_mesh.close()
     if current_note:
         midi_out.note_off(current_note, 0)
