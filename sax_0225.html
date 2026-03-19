@@ -1,0 +1,253 @@
+<!-- 已修正 HAND_CONNECTIONS 錯誤版本 -->
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>情緒化虛擬薩克斯風 Pro</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/combine/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+
+<style>
+body {
+font-family: 'PingFang TC', sans-serif;
+text-align: center;
+background: #1a1a1a;
+color: white;
+margin: 0;
+padding: 20px;
+overflow: hidden;
+}
+
+h1 {
+font-weight: 200;
+letter-spacing: 5px;
+color: #d4af37;
+}
+
+.container {
+width: 640px;
+margin: auto;
+}
+
+#webcam {
+display: none;
+}
+
+#output_canvas {
+transform: rotateY(180deg);
+border: 1px solid #d4af37;
+border-radius: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="loading-overlay">
+<h2>🎷 Virtual Saxophone</h2>
+<p id="status-text">載入中...</p>
+<button id="start-btn" style="display:none;">開始</button>
+</div>
+
+<h1>Virtual Saxophone</h1>
+
+<div class="container">
+<canvas id="output_canvas" width="640" height="480"></canvas>
+<video id="webcam" autoplay playsinline></video>
+</div>
+
+<p id="note_display">音符: -</p>
+<p id="vibrato_val">抖音: 0%</p>
+
+<script>
+
+/* ===== 修正重點 ===== */
+const HAND_CONNECTIONS = Hands.HAND_CONNECTIONS;
+
+/* ================= DOM ================= */
+
+const video = document.getElementById("webcam");
+const canvas = document.getElementById("output_canvas");
+const ctx = canvas.getContext("2d");
+
+const noteUI = document.getElementById("note_display");
+const vibUI = document.getElementById("vibrato_val");
+const startBtn = document.getElementById("start-btn");
+
+
+/* ================= Audio ================= */
+
+let audioCtx, sax, gainNode, currentNode;
+let lfo, lfoGain;
+
+async function initSound(){
+
+audioCtx = new AudioContext();
+
+gainNode = audioCtx.createGain();
+gainNode.gain.value = 0;
+gainNode.connect(audioCtx.destination);
+
+sax = await Soundfont.instrument(audioCtx,"alto_sax",{
+destination: gainNode
+});
+
+document.getElementById("status-text").innerText="完成";
+startBtn.style.display="block";
+}
+
+
+/* ================= Vibrato ================= */
+
+function initVibrato(){
+
+lfo = audioCtx.createOscillator();
+lfo.frequency.value = 6;
+
+lfoGain = audioCtx.createGain();
+lfoGain.gain.value = 0;
+
+lfo.connect(lfoGain);
+lfo.start();
+}
+
+
+/* ================= Player ================= */
+
+function play(midi){
+
+stop();
+
+currentNode = sax.play(midi);
+
+if(currentNode.source?.detune){
+lfoGain.connect(currentNode.source.detune);
+}
+}
+
+function stop(){
+
+if(currentNode){
+
+currentNode.stop();
+currentNode = null;
+}
+}
+
+
+/* ================= Control ================= */
+
+let lastFinger = null;
+let smoothJitter = 0;
+
+const JITTER_TH = 0.008;
+const DIST_TH = 0.08;
+
+
+/* ================= Main ================= */
+
+function update(hands){
+
+ctx.clearRect(0,0,640,480);
+ctx.drawImage(video,0,0,640,480);
+
+
+/* === Draw === */
+
+if(hands?.multiHandLandmarks){
+
+hands.multiHandLandmarks.forEach(lm=>{
+
+drawConnectors(ctx,lm,HAND_CONNECTIONS,{color:"#00ffcc"});
+drawLandmarks(ctx,lm,{color:"#ffd700",radius:3});
+
+});
+}
+
+
+/* === Jitter === */
+
+let raw=0;
+
+if(hands?.multiHandLandmarks?.[0]){
+
+const lm=hands.multiHandLandmarks[0];
+
+if(lastFinger){
+
+raw=Math.hypot(
+lm[8].x-lastFinger.x,
+lm[8].y-lastFinger.y
+);
+}
+
+lastFinger={x:lm[8].x,y:lm[8].y};
+}
+
+if(raw<JITTER_TH) raw=0;
+
+smoothJitter=smoothJitter*0.8+raw*0.2;
+
+
+/* === Vibrato === */
+
+const vib=Math.min(smoothJitter*8000,40);
+
+lfoGain.gain.setTargetAtTime(
+vib,
+audioCtx.currentTime,
+0.1
+);
+
+vibUI.innerText="抖音: "+Math.round(vib)+"%";
+
+}
+
+
+/* ================= MediaPipe ================= */
+
+const hands=new Hands({
+locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+maxNumHands:1,
+minDetectionConfidence:.7,
+minTrackingConfidence:.7
+});
+
+hands.onResults(update);
+
+
+const cam=new Camera(video,{
+onFrame:async()=>{
+await hands.send({image:video});
+},
+width:640,
+height:480
+});
+
+
+/* ================= Start ================= */
+
+startBtn.onclick=()=>{
+
+audioCtx.resume();
+
+initVibrato();
+
+document.getElementById("loading-overlay").style.display="none";
+
+cam.start();
+};
+
+initSound();
+
+</script>
+
+</body>
+</html>

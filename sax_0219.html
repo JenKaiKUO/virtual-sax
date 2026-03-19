@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>情緒化虛擬薩克斯風 Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/combine/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+
+    <style>
+        body { font-family: 'PingFang TC', sans-serif; text-align: center; background: #1a1a1a; color: white; margin: 0; padding: 20px; overflow: hidden; }
+        h1 { font-weight: 200; letter-spacing: 5px; color: #d4af37; }
+        .container { position: relative; width: 640px; margin: auto; }
+        #webcam { transform: rotateY(180deg); width: 640px; height: 480px; display: none; }
+        #output_canvas { 
+            transform: rotateY(180deg); 
+            width: 640px; height: 480px; 
+            border: 1px solid #d4af37; 
+            border-radius: 20px; 
+            box-shadow: 0 0 20px rgba(212, 175, 55, 0.2);
+        }
+        .status-box { 
+            display: flex; justify-content: space-around; 
+            padding: 15px; background: #252525; 
+            border-radius: 12px; margin: 20px auto; width: 600px;
+        }
+        .vibrato-indicator { color: #00FFCC; font-size: 14px; margin-top: 5px; }
+        .active { color: #ffd700; text-shadow: 0 0 10px #ffd700; }
+        #loading-overlay { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(10, 10, 10, 0.95); 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; 
+        }
+        .btn-start { 
+            padding: 15px 50px; font-size: 20px; cursor: pointer; 
+            background: transparent; border: 2px solid #d4af37; border-radius: 50px; 
+            color: #d4af37; transition: 0.4s;
+        }
+        .btn-start:hover { background: #d4af37; color: #111; box-shadow: 0 0 30px #d4af37; }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <h2 style="font-weight: 200;">🎷 Virtual Saxophone <span style="color:#d4af37">Expression</span></h2>
+        <p id="status-text">載入高品質音色中...</p>
+        <button class="btn-start" id="start-btn" style="display:none;">開啟感官演奏</button>
+    </div>
+
+    <h1>Virtual Saxophone</h1>
+    
+    <div class="container">
+        <canvas id="output_canvas"></canvas>
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+
+    <div class="status-box">
+        <div>
+            <div id="note_display" style="font-size: 28px;">音符: -</div>
+            <div id="vibrato_val" class="vibrato-indicator">抖音強度: 0%</div>
+        </div>
+        <div style="text-align: right;">
+            <div id="mouth_status" style="font-size: 18px;">狀態: 等待</div>
+            <div id="volume_bar" style="width: 150px; height: 10px; background: #444; margin-top: 10px; border-radius: 5px; overflow: hidden;">
+                <div id="volume_fill" style="width: 0%; height: 100%; background: #d4af37; transition: width 0.1s;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const noteDisplay = document.getElementById('note_display');
+        const mouthStatusDisplay = document.getElementById('mouth_status');
+        const volumeFill = document.getElementById('volume_fill');
+        const vibratoDisplay = document.getElementById('vibrato_val');
+        const startBtn = document.getElementById('start-btn');
+        const overlay = document.getElementById('loading-overlay');
+
+        canvasElement.width = 640;
+        canvasElement.height = 480;
+
+        let audioCtx, saxPlayer, currentAudioNode, mainGain;
+        let lastHandPos = null;
+        let currentMidi = null;
+        let isMouthOpen = true;
+
+        const MOUTH_OPEN_THRESH = 0.025;
+        const DIST_PRESS_THRESH = 0.08;
+
+        // --- 初始化音訊 ---
+        async function initSound() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            mainGain = audioCtx.createGain();
+            mainGain.connect(audioCtx.destination);
+            
+            try {
+                // 使用更具動態感的 Alto Sax
+                saxPlayer = await Soundfont.instrument(audioCtx, 'alto_sax', {
+                    soundfont: 'MusicianStrings',
+                    destination: mainGain
+                });
+                document.getElementById('status-text').innerText = "系統已就緒，請保持光線充足";
+                startBtn.style.display = "block";
+            } catch (e) {
+                document.getElementById('status-text').innerText = "載入失敗，請重新整理";
+            }
+        }
+
+        // --- 情緒處理函式 ---
+        function applyExpression(mouthGap, handJitter) {
+            if (!mainGain || !currentAudioNode) return;
+
+            // 1. 大小聲 (Expression Gain): 嘴巴閉得越緊，聲音越強
+            // 將 mouthGap (0.025 ~ 0) 映射到音量 (0.3 ~ 1.8)
+            const tightness = Math.max(0, (MOUTH_OPEN_THRESH - mouthGap) / MOUTH_OPEN_THRESH);
+            const targetVolume = 0.3 + (tightness * 1.5);
+            mainGain.gain.setTargetAtTime(targetVolume, audioCtx.currentTime, 0.05);
+            volumeFill.style.width = `${tightness * 100}%`;
+
+            // 2. 抖音 (Vibrato): 偵測手部食指指尖的位移速度
+            if (handJitter > 0.002) {
+                const vibratoFreq = 6; // 6Hz 的經典抖音速度
+                const vibratoDepth = Math.min(handJitter * 8000, 40); // 限制最大抖幅
+                const detuneVal = Math.sin(audioCtx.currentTime * 2 * Math.PI * vibratoFreq) * vibratoDepth;
+                
+                // 修正：某些 Soundfont 節點需透過 source 控制
+                if (currentAudioNode.source && currentAudioNode.source.detune) {
+                    currentAudioNode.source.detune.value = detuneVal;
+                }
+                vibratoDisplay.innerText = `抖音強度: ${Math.round(vibratoDepth)}%`;
+                vibratoDisplay.style.opacity = 1;
+            } else {
+                vibratoDisplay.style.opacity = 0.3;
+            }
+        }
+
+        function playNote(midi) {
+            if (!saxPlayer) return;
+            if (currentAudioNode) currentAudioNode.stop();
+            // 初始音量給 0，交給 mainGain 控制
+            currentAudioNode = saxPlayer.play(midi, audioCtx.currentTime, { gain: 1 });
+            currentMidi = midi;
+        }
+
+        function stopNote() {
+            if (currentAudioNode) {
+                currentAudioNode.stop();
+                currentAudioNode = null;
+                currentMidi = null;
+            }
+        }
+
+        // --- 核心邏輯 ---
+        function onResults(handsRes, faceRes) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, 640, 480);
+            canvasCtx.drawImage(videoElement, 0, 0, 640, 480);
+
+            let L = {}, R = {};
+            let handJitter = 0;
+
+            if (handsRes.multiHandLandmarks) {
+                handsRes.multiHandLandmarks.forEach((lm, i) => {
+                    const label = handsRes.multiHandedness[i].label;
+                    drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#d4af37', lineWidth: 2});
+                    
+                    const dist = (a, b) => Math.hypot(a.x-b.x, a.y-b.y);
+                    const isP = (f, b) => dist(lm[f], lm[b]) < DIST_PRESS_THRESH;
+
+                    if (label === 'Right') {
+                        L = { idx:isP(8,5), mid:isP(12,9), rng:isP(16,13), pnk:isP(20,17), thm:isP(4,2) };
+                        // 計算右手抖動 (作為抖音來源)
+                        if (lastHandPos) handJitter = dist(lm[8], lastHandPos);
+                        lastHandPos = {x: lm[8].x, y: lm[8].y};
+                    } else {
+                        R = { idx:isP(8,5), mid:isP(12,9), rng:isP(16,13), pnk:isP(20,17) };
+                    }
+                });
+            }
+
+            let mouthGap = 0.1;
+            if (faceRes.multiFaceLandmarks?.[0]) {
+                const fm = faceRes.multiFaceLandmarks[0];
+                mouthGap = Math.abs(fm[13].y - fm[14].y);
+                
+                // 繪製呼吸指示器
+                canvasCtx.fillStyle = mouthGap < MOUTH_OPEN_THRESH ? "#d4af37" : "#ff4444";
+                canvasCtx.beginPath();
+                canvasCtx.arc(fm[13].x * 640, fm[13].y * 480, 4, 0, 2*Math.PI);
+                canvasCtx.fill();
+            }
+
+            // 指法邏輯
+            let nextNote = null;
+            if (L.idx && L.mid && L.rng) {
+                if (L.pnk) nextNote = 68;
+                else if (R.idx && R.mid && R.rng && R.pnk) nextNote = 60;
+                else if (R.idx && R.mid && R.rng) nextNote = 62;
+                else if (R.idx && R.mid) nextNote = 64;
+                else if (R.idx) nextNote = 65;
+                else nextNote = 67;
+            } else if (L.idx && L.mid) nextNote = 69;
+            else if (L.idx) nextNote = 71;
+            else if (L.mid) nextNote = 72;
+            
+            if (nextNote && L.thm) nextNote += 12;
+
+            // 狀態判定
+            const nowMouthOpen = mouthGap > MOUTH_OPEN_THRESH;
+            
+            if (nextNote && !nowMouthOpen) {
+                if (nextNote !== currentMidi || isMouthOpen) playNote(nextNote);
+                applyExpression(mouthGap, handJitter); // 即時更新情緒
+            } else {
+                stopNote();
+            }
+
+            isMouthOpen = nowMouthOpen;
+            noteDisplay.innerText = `音符: ${nextNote ? midiToNoteName(nextNote) : "-"}`;
+            mouthStatusDisplay.innerText = nowMouthOpen ? "狀態: 待機 (開口)" : "狀態: 吹奏中";
+            mouthStatusDisplay.className = nowMouthOpen ? "" : "active";
+
+            canvasCtx.restore();
+        }
+
+        function midiToNoteName(m) {
+            const n = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            return n[m % 12] + (Math.floor(m / 12) - 1);
+        }
+
+        // --- 模型啟動 ---
+        const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7 });
+        
+        const faceMesh = new FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                const h = await hands.send({ image: videoElement });
+                const f = await faceMesh.send({ image: videoElement });
+            },
+            width: 640, height: 480
+        });
+
+        // 監聽器手動串接 (因 MediaPipe 非同步特性)
+        let latestHands = null;
+        hands.onResults(res => latestHands = res);
+        faceMesh.onResults(res => onResults(latestHands, res));
+
+        startBtn.onclick = () => {
+            audioCtx.resume();
+            overlay.style.display = 'none';
+            camera.start();
+        };
+
+        initSound();
+    </script>
+</body>
+</html>

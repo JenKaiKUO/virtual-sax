@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>虛擬薩克斯風 - 嘴部斷奏版</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #222; color: white; }
+        .container { position: relative; width: 640px; margin: auto; }
+        #webcam { transform: rotateY(180deg); width: 640px; height: 480px; display: none; }
+        #output_canvas { transform: rotateY(180deg); width: 640px; height: 480px; border: 2px solid #555; border-radius: 10px; }
+        .info { font-size: 24px; margin-top: 10px; }
+        .status-box { display: flex; justify-content: space-around; padding: 10px; background: #333; border-radius: 5px; margin-top: 5px; }
+        .active { color: #00ff00; font-weight: bold; }
+        .inactive { color: #ff4444; }
+    </style>
+</head>
+<body>
+
+    <h1>🎷 Virtual Saxophone</h1>
+    <div class="container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div class="info">
+        <div id="note_display">當前音符: -</div>
+        <div class="status-box">
+            <div id="mouth_status">嘴巴狀態: 偵測中...</div>
+            <div id="fps">FPS: --</div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const noteDisplay = document.getElementById('note_display');
+        const mouthStatusDisplay = document.getElementById('mouth_status');
+
+        // --- 音訊處理 (Web Audio API) ---
+        let audioCtx = null;
+        let oscillator = null;
+        let gainNode = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                gainNode = audioCtx.createGain();
+                gainNode.connect(audioCtx.destination);
+                gainNode.gain.value = 0;
+            }
+        }
+
+        function midiToFreq(midi) {
+            return 440 * Math.pow(2, (midi - 69) / 12);
+        }
+
+        function playNote(midi) {
+            initAudio();
+            if (oscillator) oscillator.stop();
+            oscillator = audioCtx.createOscillator();
+            oscillator.type = 'sawtooth'; // 鋸齒波，較像管樂器聲音
+            oscillator.frequency.setValueAtTime(midiToFreq(midi), audioCtx.currentTime);
+            oscillator.connect(gainNode);
+            oscillator.start();
+            gainNode.gain.setTargetAtTime(0.3, audioCtx.currentTime, 0.05); // 漸強，避免爆音
+        }
+
+        function stopNote() {
+            if (gainNode) {
+                gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05); // 漸弱，模擬斷奏
+            }
+        }
+
+        // --- 邏輯變數 ---
+        let currentNote = null;
+        let isMouthOpen = true;
+        const MOUTH_OPEN_THRESH = 0.025;
+        const DIST_PRESS_THRESH = 0.08;
+
+        // --- 距離計算 ---
+        function getDistance(pt1, pt2) {
+            return Math.hypot(pt1.x - pt2.x, pt1.y - pt2.y);
+        }
+
+        // --- 指法判定 ---
+        function checkFinger(tip, mcp) {
+            return getDistance(tip, mcp) < DIST_PRESS_THRESH;
+        }
+
+        // --- 模型結果處理 ---
+        let handResults = null;
+        let faceResults = null;
+
+        function onHandResults(results) { handResults = results; updateLogic(); }
+        function onFaceResults(results) { faceResults = results; }
+
+        function updateLogic() {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+            let L = { idx: false, mid: false, rng: false, pnk: false, thumb: false };
+            let R = { idx: false, mid: false, rng: false, pnk: false };
+
+            // 1. 處理手部指法
+            if (handResults && handResults.multiHandLandmarks) {
+                for (let i = 0; i < handResults.multiHandLandmarks.length; i++) {
+                    const landmarks = handResults.multiHandLandmarks[i];
+                    const label = handResults.multiHandedness[i].label; // Left/Right
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+
+                    if (label === 'Right') { // 網頁端左右手標籤通常與實體相反，此處依邏輯判斷
+                        L.idx = checkFinger(landmarks[8], landmarks[5]);
+                        L.mid = checkFinger(landmarks[12], landmarks[9]);
+                        L.rng = checkFinger(landmarks[16], landmarks[13]);
+                        L.pnk = checkFinger(landmarks[20], landmarks[17]);
+                        L.thumb = checkFinger(landmarks[4], landmarks[2]);
+                    } else {
+                        R.idx = checkFinger(landmarks[8], landmarks[5]);
+                        R.mid = checkFinger(landmarks[12], landmarks[9]);
+                        R.rng = checkFinger(landmarks[16], landmarks[13]);
+                        R.pnk = checkFinger(landmarks[20], landmarks[17]);
+                    }
+                }
+            }
+
+            // 2. 處理嘴部
+            let newIsMouthOpen = true;
+            if (faceResults && faceResults.multiFaceLandmarks && faceResults.multiFaceLandmarks.length > 0) {
+                const fm = faceResults.multiFaceLandmarks[0];
+                const lipTop = fm[13];
+                const lipBottom = fm[14];
+                const mouthDist = Math.abs(lipTop.y - lipBottom.y);
+                
+                newIsMouthOpen = mouthDist > MOUTH_OPEN_THRESH;
+                
+                // 畫出嘴部提示點
+                canvasCtx.fillStyle = "#FF00FF";
+                canvasCtx.beginPath();
+                canvasCtx.arc(lipTop.x * canvasElement.width, lipTop.y * canvasElement.height, 3, 0, 2*Math.PI);
+                canvasCtx.arc(lipBottom.x * canvasElement.width, lipBottom.y * canvasElement.height, 3, 0, 2*Math.PI);
+                canvasCtx.fill();
+            }
+
+            // 3. 轉譯指法為音符 (移植你的 Python 邏輯)
+            let nextNote = null;
+            if (L.idx && L.mid && L.rng) {
+                if (L.pnk) nextNote = 68;
+                else if (R.idx && !R.mid && !R.rng && !R.pnk) nextNote = 65;
+                else if (R.mid && !R.idx && !R.rng && !R.pnk) nextNote = 66;
+                else if (R.idx && R.mid && !R.rng && !R.pnk) nextNote = 64;
+                else if (R.idx && R.mid && R.rng && !R.pnk) nextNote = 62;
+                else if (R.idx && R.mid && R.rng && R.pnk) nextNote = 60;
+                else nextNote = 67;
+            } else if (L.idx && !L.mid && !L.rng && !L.pnk) nextNote = 71;
+            else if (L.idx && L.mid && !L.rng && !L.pnk) nextNote = 69;
+            else if (L.mid && !L.idx && !L.rng && !L.pnk) nextNote = 72;
+            else if (L.idx && L.mid && L.rng && L.pnk) nextNote = 68;
+
+            if (nextNote && L.thumb) nextNote += 12;
+
+            // 4. MIDI 控制邏輯 (嘴部斷奏)
+            const noteChanged = (nextNote !== currentNote);
+            const mouthChanged = (newIsMouthOpen !== isMouthOpen);
+
+            if (noteChanged || mouthChanged) {
+                if (nextNote && !newIsMouthOpen) {
+                    // 如果指法改變或是嘴巴剛剛閉上，則發聲
+                    if (noteChanged || (mouthChanged && isMouthOpen)) {
+                        playNote(nextNote);
+                    }
+                } else {
+                    stopNote();
+                }
+            }
+
+            // 更新 UI
+            currentNote = nextNote;
+            isMouthOpen = newIsMouthOpen;
+            noteDisplay.innerText = nextNote ? `當前音符: ${nextNote}` : "當前音符: -";
+            mouthStatusDisplay.innerText = isMouthOpen ? "嘴巴狀態: OPEN (停止)" : "嘴巴狀態: CLOSED (吹奏)";
+            mouthStatusDisplay.className = isMouthOpen ? "inactive" : "active";
+
+            canvasCtx.restore();
+        }
+
+        // --- 初始化 MediaPipe ---
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(onHandResults);
+
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        faceMesh.onResults(onFaceResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+                await faceMesh.send({ image: videoElement });
+            },
+            width: 640,
+            height: 480
+        });
+
+        canvasElement.width = 640;
+        canvasElement.height = 480;
+        camera.start();
+
+        // 提示使用者點擊以啟動音訊
+        window.onclick = () => { initAudio(); console.log("Audio Context Started"); };
+    </script>
+</body>
+</html>

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>虛擬薩克斯風</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/combine/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/browser/midiwriter.min.js"></script>
+
+    <style>
+        :root { --gold: #d4af37; --bg: #121212; --panel: #1e1e1e; --red: #ff4444; --green: #00ff00; }
+        body { 
+            font-family: 'PingFang TC', sans-serif; 
+            background: var(--bg); color: white; margin: 0; 
+            display: flex; flex-direction: column; align-items: center; 
+            min-height: 100vh; overflow-x: hidden;
+        }
+        
+        h1 { font-weight: 200; letter-spacing: 4px; color: var(--gold); margin: 15px 0; font-size: 24px; }
+
+        .main-layout { 
+            display: flex; justify-content: center; gap: 15px; 
+            padding: 10px; width: 98%; max-width: 1150px; 
+        }
+
+        .status-sidebar { flex: 0 0 180px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .video-container { 
+            flex: 1; position: relative; border-radius: 12px; overflow: hidden; 
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6); background: #000; aspect-ratio: 4/3;
+        }
+
+        .control-panel { 
+            flex: 0 0 240px; background: var(--panel); padding: 15px; border-radius: 12px; 
+            display: flex; flex-direction: column; gap: 15px; border: 1px solid #333;
+        }
+
+        .monitor-card { background: var(--panel); padding: 12px; border-radius: 10px; border-left: 3px solid var(--gold); position: relative; }
+        .monitor-label { font-size: 11px; color: #888; margin-bottom: 3px; }
+        
+        /* 雙音符顯示樣式 */
+        .monitor-value { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
+        .note-main { font-size: 24px; font-weight: bold; color: var(--gold); }
+        .note-sub { font-size: 13px; color: #aaa; font-weight: 400; }
+
+        #vibrato_canvas { position: absolute; bottom: 0; left: 0; width: 100%; height: 40px; pointer-events: none; }
+
+        #webcam { transform: rotateY(180deg); display: none; }
+        #output_canvas { transform: rotateY(180deg); width: 100%; height: 100%; display: block; object-fit: cover; }
+
+        .btn-record {
+            padding: 12px; border-radius: 8px; border: 1px solid var(--red);
+            background: rgba(255, 68, 68, 0.05); color: var(--red);
+            cursor: pointer; font-weight: bold; transition: 0.3s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-record.recording { background: var(--red); color: white; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        .switch-item { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+
+        input[type=range] { width: 100%; accent-color: var(--gold); cursor: pointer; }
+        input[type=checkbox] { cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold); }
+
+        #loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .btn-start { padding: 12px 40px; font-size: 16px; cursor: pointer; background: transparent; border: 2px solid var(--gold); border-radius: 25px; color: var(--gold); transition: 0.3s; }
+        .status-playing { color: var(--green); }
+        .status-waiting { color: var(--red); }
+        hr { border: 0; border-top: 1px solid #333; margin: 2px 0; }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <h2 style="font-weight: 200; color:var(--gold)">🎷 SAXOPHONE WORKSTATION</h2>
+        <p id="status-text">載入即時分析系統...</p>
+        <button class="btn-start" id="start-btn" style="display:none;">開始演奏 (Start)</button>
+    </div>
+
+    <h1>VIRTUAL SAXOPHONE</h1> 
+    <div class="main-layout">
+        <div class="status-sidebar">
+            <div class="monitor-card">
+                <div class="monitor-label">當前音符</div>
+                <div id="note_display" class="monitor-value">
+                    <span class="note-main">-</span>
+                    <span class="note-sub">MIDI: -</span>
+                </div>
+            </div>
+            <div class="monitor-card">
+                <div class="monitor-label">氣息狀態</div>
+                <div id="mouth_status" class="status-waiting" style="font-size:18px; font-weight:bold;">等待中</div>
+            </div>
+            <div class="monitor-card" style="height: 80px;">
+                <div class="monitor-label">左手抖音</div>
+                <div id="vibrato_status" style="font-size:18px; font-weight:bold;">0%</div>
+                <canvas id="vibrato_canvas"></canvas>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+
+        <div class="control-panel">
+            <div class="control-group">
+                <label>MIDI 錄製</label>
+                <button id="record_btn" class="btn-record">
+                    <span id="rec_dot">●</span> <span id="rec_text">開始錄製</span>
+                </button>
+            </div>
+            <hr>
+            <div class="control-group">
+                <label>視覺提示</label>
+                <div class="switch-item">
+                    <span>手部提示線</span>
+                    <input type="checkbox" id="show_hands" checked>
+                </div>
+                <div class="switch-item">
+                    <span>氣息偵測點</span>
+                    <input type="checkbox" id="show_mouth" checked>
+                </div>
+            </div>
+            <hr>
+            <div class="control-group">
+                <label>抖音靈敏度</label>
+                <input type="range" id="vib_sens" min="1" max="25" value="12">
+            </div>
+            <div class="control-group">
+                <label>主音量</label>
+                <input type="range" id="master_vol" min="0" max="200" value="120">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const masterVol = document.getElementById('master_vol');
+        const vibSens = document.getElementById('vib_sens');
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const vibCanvas = document.getElementById('vibrato_canvas');
+        const vibCtx = vibCanvas.getContext('2d');
+        const noteDisplay = document.getElementById('note_display');
+        const mouthStatusDisplay = document.getElementById('mouth_status');
+        const vibratoStatusDisplay = document.getElementById('vibrato_status');
+        const showHandsCheck = document.getElementById('show_hands');
+        const showMouthCheck = document.getElementById('show_mouth');
+
+        let isRecording = false;
+        let recordedNotes = [];
+        let activeNoteRecord = null;
+        let recordStartTime = 0;
+        let wavePoints = new Array(50).fill(0);
+
+        // --- 音名轉換工具 ---
+        function midiToNoteName(midi) {
+            if (!midi) return "-";
+            const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const octave = Math.floor(midi / 12) - 1;
+            const name = names[midi % 12];
+            return name + octave;
+        }
+
+        function resizeCanvas() {
+            canvasElement.width = canvasElement.clientWidth;
+            canvasElement.height = canvasElement.clientHeight;
+            vibCanvas.width = vibCanvas.clientWidth;
+            vibCanvas.height = vibCanvas.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        let audioCtx, saxPlayer, currentAudioNode;
+        let lastLeftHandPos = { x: 0.5, y: 0.5 };
+        let vibratoAmount = 0;
+
+        function getTimestamp() {
+            const n = new Date();
+            const f = (v) => v.toString().padStart(2, '0');
+            return `${n.getFullYear()}${f(n.getMonth()+1)}${f(n.getDate())}_${f(n.getHours())}${f(n.getMinutes())}`;
+        }
+
+        async function initSound() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            try {
+                saxPlayer = await Soundfont.instrument(audioCtx, 'alto_sax', { soundfont: 'MusicianStrings' });
+                document.getElementById('status-text').innerText = "系統已就緒";
+                document.getElementById('start-btn').style.display = "block";
+                resizeCanvas();
+            } catch (e) {
+                document.getElementById('status-text').innerText = "音色載入失敗";
+            }
+        }
+
+        function recordNoteOn(midi) {
+            if (!isRecording) return;
+            if (activeNoteRecord && activeNoteRecord.midi !== midi) recordNoteOff();
+            if (!activeNoteRecord) activeNoteRecord = { midi, start: Date.now() - recordStartTime };
+        }
+
+        function recordNoteOff() {
+            if (!isRecording || !activeNoteRecord) return;
+            let duration = (Date.now() - recordStartTime) - activeNoteRecord.start;
+            if (duration > 50) {
+                recordedNotes.push(new MidiWriter.NoteEvent({
+                    pitch: [activeNoteRecord.midi],
+                    duration: 'T' + Math.floor(duration / 1.8),
+                    velocity: 90
+                }));
+            }
+            activeNoteRecord = null;
+        }
+
+        document.getElementById('record_btn').onclick = function() {
+            if (!isRecording) {
+                isRecording = true;
+                recordedNotes = [];
+                recordStartTime = Date.now();
+                this.classList.add('recording');
+                document.getElementById('rec_text').innerText = "停止錄製";
+            } else {
+                recordNoteOff();
+                isRecording = false;
+                this.classList.remove('recording');
+                document.getElementById('rec_text').innerText = "開始錄製";
+                if (recordedNotes.length > 0) {
+                    const track = new MidiWriter.Track();
+                    track.addEvent(new MidiWriter.ProgramChangeEvent({instrument: 65}));
+                    track.addEvent(recordedNotes);
+                    const writer = new MidiWriter.Writer(track);
+                    const link = document.createElement('a');
+                    link.href = writer.dataUri();
+                    link.download = `sax_recording_${getTimestamp()}.mid`;
+                    link.click();
+                }
+            }
+        };
+
+        function playNote(midi) {
+            if (!saxPlayer) return;
+            if (currentAudioNode) currentAudioNode.stop();
+            currentAudioNode = saxPlayer.play(midi, audioCtx.currentTime, { gain: masterVol.value / 100 });
+            recordNoteOn(midi);
+        }
+
+        function stopNote() {
+            if (currentAudioNode) { currentAudioNode.stop(); recordNoteOff(); currentAudioNode = null; }
+        }
+
+        function drawVibWave() {
+            vibCtx.clearRect(0, 0, vibCanvas.width, vibCanvas.height);
+            vibCtx.beginPath();
+            vibCtx.strokeStyle = 'white';
+            const step = vibCanvas.width / 49;
+            for(let i=0; i<50; i++) {
+                const y = (vibCanvas.height/2) + Math.sin(Date.now()*0.02 + i*0.5) * (wavePoints[i]*15);
+                i === 0 ? vibCtx.moveTo(i*step, y) : vibCtx.lineTo(i*step, y);
+            }
+            vibCtx.stroke();
+        }
+
+        let currentNote = null, isMouthOpen = true, handResults = null, faceResults = null;
+
+        function updateLogic() {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+            let L = { idx: false, mid: false, rng: false, pnk: false, thumb: false };
+            let R = { idx: false, mid: false, rng: false, pnk: false };
+
+            if (handResults && handResults.multiHandLandmarks) {
+                handResults.multiHandLandmarks.forEach((landmarks, idx) => {
+                    const label = handResults.multiHandedness[idx].label;
+                    if (showHandsCheck.checked && typeof drawConnectors !== 'undefined') {
+                        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#d4af37', lineWidth: 2});
+                        drawLandmarks(canvasCtx, landmarks, {color: '#fff', lineWidth: 1, radius: 2});
+                    }
+                    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+                    if (label === 'Right') { 
+                        L.idx = dist(landmarks[8], landmarks[5]) < 0.08;
+                        L.mid = dist(landmarks[12], landmarks[9]) < 0.08;
+                        L.rng = dist(landmarks[16], landmarks[13]) < 0.08;
+                        L.pnk = dist(landmarks[20], landmarks[17]) < 0.08;
+                        L.thumb = dist(landmarks[4], landmarks[2]) < 0.08;
+                        const movement = Math.hypot(landmarks[0].x - lastLeftHandPos.x, landmarks[0].y - lastLeftHandPos.y);
+                        vibratoAmount = (movement > 0.003) ? Math.min(vibratoAmount*0.6 + movement*(vibSens.value/2), 1.0) : vibratoAmount*0.85;
+                        lastLeftHandPos = { x: landmarks[0].x, y: landmarks[0].y };
+                    } else {
+                        R.idx = dist(landmarks[8], landmarks[5]) < 0.08;
+                        R.mid = dist(landmarks[12], landmarks[9]) < 0.08;
+                        R.rng = dist(landmarks[16], landmarks[13]) < 0.08;
+                        R.pnk = dist(landmarks[20], landmarks[17]) < 0.08;
+                    }
+                });
+            }
+
+            let newIsMouthOpen = true;
+            if (faceResults && faceResults.multiFaceLandmarks?.[0]) {
+                const fm = faceResults.multiFaceLandmarks[0];
+                newIsMouthOpen = Math.abs(fm[13].y - fm[14].y) > 0.025;
+                if (showMouthCheck.checked) {
+                    canvasCtx.fillStyle = newIsMouthOpen ? "rgba(255,255,255,0.3)" : "var(--gold)";
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(fm[13].x * canvasElement.width, fm[13].y * canvasElement.height, 6, 0, Math.PI*2);
+                    canvasCtx.fill();
+                }
+            }
+
+            let nextNote = null;
+            if (L.idx && L.mid && L.rng) {
+                if (L.pnk) nextNote = 68;
+                else if (R.idx && !R.mid && !R.rng && !R.pnk) nextNote = 65;
+                else if (R.mid && !R.idx && !R.rng && !R.pnk) nextNote = 66;
+                else if (R.idx && R.mid && !R.rng && !R.pnk) nextNote = 64;
+                else if (R.idx && R.mid && R.rng && !R.pnk) nextNote = 62;
+                else if (R.idx && R.mid && R.rng && R.pnk) nextNote = 60;
+                else nextNote = 67;
+            } else if (L.idx && !L.mid && !L.rng && !L.pnk) nextNote = 71;
+            else if (L.idx && L.mid && !L.rng && !L.pnk) nextNote = 69;
+            else if (L.mid && !L.idx && !L.rng && !L.pnk) nextNote = 72;
+            else if (L.idx && L.mid && L.rng && L.pnk) nextNote = 68;
+            if (nextNote && L.thumb) nextNote += 12;
+
+            if (nextNote !== currentNote || newIsMouthOpen !== isMouthOpen) {
+                (nextNote && !newIsMouthOpen) ? playNote(nextNote) : stopNote();
+            }
+
+            if (currentAudioNode && !newIsMouthOpen) {
+                const v = (masterVol.value/100) + Math.sin(Date.now()*0.012)*(vibratoAmount*0.8);
+                currentAudioNode.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
+            }
+
+            currentNote = nextNote; isMouthOpen = newIsMouthOpen;
+            wavePoints.push(vibratoAmount); wavePoints.shift(); drawVibWave();
+            
+            // --- 更新顯示 ---
+            noteDisplay.querySelector('.note-main').innerText = nextNote ? midiToNoteName(nextNote) : "-";
+            noteDisplay.querySelector('.note-sub').innerText = nextNote ? `MIDI: ${nextNote}` : "MIDI: -";
+            
+            mouthStatusDisplay.innerText = isMouthOpen ? "等待中 (WAITING)" : "吹奏中 (PLAYING)";
+            mouthStatusDisplay.className = isMouthOpen ? "status-waiting" : "status-playing";
+            vibratoStatusDisplay.innerText = `${Math.round(vibratoAmount*100)}%`;
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6 });
+        hands.onResults(res => { handResults = res; updateLogic(); });
+        
+        const faceMesh = new FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+        faceMesh.onResults(res => { faceResults = res; });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { 
+                await hands.send({image: videoElement}); 
+                await faceMesh.send({image: videoElement}); 
+            },
+            width: 640, height: 480
+        });
+
+        document.getElementById('start-btn').onclick = () => {
+            audioCtx.resume();
+            document.getElementById('loading-overlay').style.display = 'none';
+            camera.start();
+        };
+
+        initSound();
+    </script>
+</body>
+</html>

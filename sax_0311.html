@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>虛擬薩克斯風 - 波形監測版</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/combine/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+
+    <style>
+        :root { --gold: #d4af37; --bg: #121212; --panel: #1e1e1e; }
+        body { 
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; 
+            background: var(--bg); color: white; margin: 0; 
+            display: flex; flex-direction: column; align-items: center; 
+            min-height: 100vh; overflow-x: hidden;
+        }
+        
+        h1 { font-weight: 200; letter-spacing: 4px; color: var(--gold); margin: 15px 0; font-size: 24px; }
+
+        .main-layout { 
+            display: flex; justify-content: center; align-items: stretch; gap: 15px; 
+            padding: 10px; width: 98%; max-width: 1100px; 
+        }
+
+        .status-sidebar { flex: 0 1 180px; display: flex; flex-direction: column; gap: 10px; }
+        
+        .video-container { 
+            flex: 1 1 540px; position: relative; border-radius: 12px; overflow: hidden; 
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6); background: #000; aspect-ratio: 4/3;
+        }
+
+        .control-panel { 
+            flex: 0 1 220px; background: var(--panel); padding: 15px; border-radius: 12px; 
+            display: flex; flex-direction: column; gap: 15px; text-align: left; font-size: 14px; border: 1px solid #333;
+        }
+
+        .monitor-card { background: var(--panel); padding: 12px; border-radius: 10px; border-left: 3px solid var(--gold); position: relative; overflow: hidden;}
+        .monitor-label { font-size: 11px; color: #888; margin-bottom: 3px; }
+        .monitor-value { font-size: 18px; font-weight: bold; position: relative; z-index: 2; }
+
+        /* 波形圖專用畫布 */
+        #vibrato_canvas {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 40px;
+            z-index: 1; opacity: 0.6; pointer-events: none;
+        }
+
+        #webcam { transform: rotateY(180deg); display: none; }
+        #output_canvas { transform: rotateY(180deg); width: 100%; height: 100%; display: block; object-fit: cover; }
+
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider-ui { position: absolute; cursor: pointer; inset: 0; background-color: #444; transition: .3s; border-radius: 22px; }
+        .slider-ui:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider-ui { background-color: var(--gold); }
+        input:checked + .slider-ui:before { transform: translateX(22px); }
+
+        input[type=range] { width: 100%; accent-color: var(--gold); cursor: pointer; }
+
+        #loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .btn-start { padding: 12px 40px; font-size: 16px; cursor: pointer; background: transparent; border: 2px solid var(--gold); border-radius: 25px; color: var(--gold); transition: 0.3s; }
+        .btn-start:hover { background: var(--gold); color: black; }
+
+        .active { color: #00ff00; }
+        .inactive { color: #ff4444; }
+        .vibrato-glow { color: var(--gold); text-shadow: 0 0 8px var(--gold); }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <h2 style="font-weight: 200; color:var(--gold)">🎷 SAXOPHONE WORKSTATION</h2>
+        <p id="status-text">載入即時分析系統...</p>
+        <button class="btn-start" id="start-btn" style="display:none;">開始演奏 (Start)</button>
+    </div>
+
+    <h1>VIRTUAL SAXOPHONE</h1>
+    
+    <div class="main-layout">
+        <div class="status-sidebar">
+            <div class="monitor-card">
+                <div class="monitor-label">音符</div>
+                <div id="note_display" class="monitor-value">-</div>
+            </div>
+            <div class="monitor-card">
+                <div class="monitor-label">氣息</div>
+                <div id="mouth_status" class="monitor-value inactive">等待</div>
+            </div>
+            <div class="monitor-card" style="height: 80px;">
+                <div class="monitor-label">抖音深度</div>
+                <div id="vibrato_status" class="monitor-value">0%</div>
+                <canvas id="vibrato_canvas"></canvas>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+
+        <div class="control-panel">
+            <div class="control-group">
+                <div style="display:flex; justify-content: space-between; align-items: center;">
+                    <label>抖音功能</label>
+                    <label class="switch">
+                        <input type="checkbox" id="vib_enable" checked>
+                        <span class="slider-ui"></span>
+                    </label>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #333;">
+
+            <div class="control-group">
+                <label>抖音靈敏度</label>
+                <input type="range" id="vib_sens" min="1" max="25" value="12">
+            </div>
+
+            <div class="control-group">
+                <label>輸出音量</label>
+                <input type="range" id="master_vol" min="0" max="200" value="120">
+            </div>
+
+            <div class="control-group" style="margin-top: auto; padding-top: 10px;">
+                <div style="font-size: 11px; color: #666;">
+                    操作提示：<br>
+                    • 畫面左側手快速晃動啟動抖音<br>
+                    • 下方波形越激烈，音量震盪越大<br>
+                    • 閉嘴發聲 / 開嘴停止
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const vibEnable = document.getElementById('vib_enable');
+        const vibSens = document.getElementById('vib_sens');
+        const masterVol = document.getElementById('master_vol');
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const vibCanvas = document.getElementById('vibrato_canvas');
+        const vibCtx = vibCanvas.getContext('2d');
+        const noteDisplay = document.getElementById('note_display');
+        const mouthStatusDisplay = document.getElementById('mouth_status');
+        const vibratoStatusDisplay = document.getElementById('vibrato_status');
+        const startBtn = document.getElementById('start-btn');
+        const overlay = document.getElementById('loading-overlay');
+
+        let wavePoints = new Array(50).fill(0); // 存放波形資料
+
+        function resizeCanvas() {
+            canvasElement.width = canvasElement.clientWidth;
+            canvasElement.height = canvasElement.clientHeight;
+            vibCanvas.width = vibCanvas.clientWidth;
+            vibCanvas.height = vibCanvas.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        let audioCtx = null;
+        let saxPlayer = null;
+        let currentAudioNode = null;
+        let lastVibHandPos = { x: 0.5, y: 0.5 };
+        let vibratoAmount = 0; 
+
+        function midiToNoteName(midi) {
+            if (!midi) return "-";
+            const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const octave = Math.floor(midi / 12) - 1;
+            return notes[midi % 12] + octave;
+        }
+
+        async function initSound() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            try {
+                saxPlayer = await Soundfont.instrument(audioCtx, 'alto_sax', { soundfont: 'MusicianStrings' });
+                document.getElementById('status-text').innerText = "準備就緒";
+                startBtn.style.display = "block";
+                resizeCanvas();
+            } catch (e) {
+                document.getElementById('status-text').innerText = "音色載入失敗";
+            }
+        }
+
+        function playNote(midi) {
+            if (!saxPlayer) return;
+            if (currentAudioNode) currentAudioNode.stop();
+            const vol = masterVol.value / 100;
+            currentAudioNode = saxPlayer.play(midi, audioCtx.currentTime, { gain: vol });
+        }
+
+        function stopNote() {
+            if (currentAudioNode) { currentAudioNode.stop(); currentAudioNode = null; }
+        }
+
+        // 繪製抖音波形圖
+        function drawVibWave() {
+            vibCtx.clearRect(0, 0, vibCanvas.width, vibCanvas.height);
+            vibCtx.beginPath();
+            vibCtx.strokeStyle = vibratoAmount > 0.15 ? '#d4af37' : '#555';
+            vibCtx.lineWidth = 2;
+            
+            const step = vibCanvas.width / (wavePoints.length - 1);
+            for(let i = 0; i < wavePoints.length; i++) {
+                const x = i * step;
+                // 根據震幅產生隨機偏移，模擬震盪波
+                const amp = wavePoints[i] * (vibCanvas.height / 2);
+                const y = (vibCanvas.height / 2) + Math.sin(Date.now() * 0.02 + i * 0.5) * amp;
+                if(i === 0) vibCtx.moveTo(x, y);
+                else vibCtx.lineTo(x, y);
+            }
+            vibCtx.stroke();
+        }
+
+        let currentNote = null;
+        let isMouthOpen = true;
+        const MOUTH_OPEN_THRESH = 0.025;
+        const DIST_PRESS_THRESH = 0.08;
+        let handResults = null;
+        let faceResults = null;
+
+        function updateLogic() {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+            let L = { idx: false, mid: false, rng: false, pnk: false, thumb: false };
+            let R = { idx: false, mid: false, rng: false, pnk: false };
+
+            if (handResults && handResults.multiHandLandmarks) {
+                for (let i = 0; i < handResults.multiHandLandmarks.length; i++) {
+                    const landmarks = handResults.multiHandLandmarks[i];
+                    const label = handResults.multiHandedness[i].label; 
+                    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#d4af37', lineWidth: 3});
+
+                    if (label === 'Right') { 
+                        L.idx = dist(landmarks[8], landmarks[5]) < DIST_PRESS_THRESH;
+                        L.mid = dist(landmarks[12], landmarks[9]) < DIST_PRESS_THRESH;
+                        L.rng = dist(landmarks[16], landmarks[13]) < DIST_PRESS_THRESH;
+                        L.pnk = dist(landmarks[20], landmarks[17]) < DIST_PRESS_THRESH;
+                        L.thumb = dist(landmarks[4], landmarks[2]) < DIST_PRESS_THRESH;
+
+                        if (vibEnable.checked) {
+                            const movement = Math.hypot(landmarks[0].x - lastVibHandPos.x, landmarks[0].y - lastVibHandPos.y);
+                            if (movement > 0.005) vibratoAmount = Math.min(vibratoAmount * 0.6 + movement * (vibSens.value / 10), 1.0);
+                            else vibratoAmount *= 0.85;
+                            lastVibHandPos = { x: landmarks[0].x, y: landmarks[0].y };
+                        }
+                    } else { 
+                        R.idx = dist(landmarks[8], landmarks[5]) < DIST_PRESS_THRESH;
+                        R.mid = dist(landmarks[12], landmarks[9]) < DIST_PRESS_THRESH;
+                        R.rng = dist(landmarks[16], landmarks[13]) < DIST_PRESS_THRESH;
+                        R.pnk = dist(landmarks[20], landmarks[17]) < DIST_PRESS_THRESH;
+                    }
+                }
+            }
+
+            // 波形資料更新
+            wavePoints.push(vibratoAmount);
+            wavePoints.shift();
+            drawVibWave();
+
+            // 嘴部繪製邏輯
+            let newIsMouthOpen = true;
+            if (faceResults && faceResults.multiFaceLandmarks?.[0]) {
+                const fm = faceResults.multiFaceLandmarks[0];
+                const upperLip = fm[13]; const lowerLip = fm[14];
+                newIsMouthOpen = Math.abs(upperLip.y - lowerLip.y) > MOUTH_OPEN_THRESH;
+
+                const drawLipPoint = (point) => {
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(point.x * canvasElement.width, point.y * canvasElement.height, 5, 0, 2 * Math.PI);
+                    canvasCtx.fillStyle = newIsMouthOpen ? "rgba(255, 255, 255, 0.4)" : "#d4af37";
+                    if (!newIsMouthOpen) { canvasCtx.shadowBlur = 10; canvasCtx.shadowColor = "#d4af37"; }
+                    canvasCtx.fill(); canvasCtx.shadowBlur = 0;
+                };
+                drawLipPoint(upperLip); drawLipPoint(lowerLip);
+            }
+
+            let nextNote = null;
+            if (L.idx && L.mid && L.rng) {
+                if (L.pnk) nextNote = 68;
+                else if (R.idx && !R.mid && !R.rng && !R.pnk) nextNote = 65;
+                else if (R.mid && !R.idx && !R.rng && !R.pnk) nextNote = 66;
+                else if (R.idx && R.mid && !R.rng && !R.pnk) nextNote = 64;
+                else if (R.idx && R.mid && R.rng && !R.pnk) nextNote = 62;
+                else if (R.idx && R.mid && R.rng && R.pnk) nextNote = 60;
+                else nextNote = 67;
+            } else if (L.idx && !L.mid && !L.rng && !L.pnk) nextNote = 71;
+            else if (L.idx && L.mid && !L.rng && !L.pnk) nextNote = 69;
+            else if (L.mid && !L.idx && !L.rng && !L.pnk) nextNote = 72;
+            else if (L.idx && L.mid && L.rng && L.pnk) nextNote = 68;
+            if (nextNote && L.thumb) nextNote += 12;
+
+            if ((nextNote !== currentNote) || (newIsMouthOpen !== isMouthOpen)) {
+                if (nextNote && !newIsMouthOpen) playNote(nextNote);
+                else stopNote();
+            }
+
+            // 強化抖音幅度
+            if (currentAudioNode && !newIsMouthOpen) {
+                // 這裡的 0.8 是震盪係數，越大音量跳動越猛烈
+                const vibWave = Math.sin(Date.now() * 0.012) * (vibratoAmount * 0.8);
+                currentAudioNode.gain.setTargetAtTime((masterVol.value/100) + vibWave, audioCtx.currentTime, 0.05);
+            }
+
+            currentNote = nextNote;
+            isMouthOpen = newIsMouthOpen;
+            noteDisplay.innerText = midiToNoteName(currentNote);
+            mouthStatusDisplay.innerText = isMouthOpen ? "WAITING" : "PLAYING";
+            mouthStatusDisplay.className = `monitor-value ${isMouthOpen ? 'inactive' : 'active'}`;
+            vibratoStatusDisplay.innerText = `${Math.round(vibratoAmount * 100)}%`;
+            vibratoStatusDisplay.className = `monitor-value ${vibratoAmount > 0.15 ? 'vibrato-glow' : ''}`;
+
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(res => { handResults = res; updateLogic(); });
+
+        const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+        faceMesh.onResults(res => { faceResults = res; });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); await faceMesh.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+
+        startBtn.onclick = () => { audioCtx.resume(); overlay.style.display = 'none'; camera.start(); };
+        initSound();
+    </script>
+</body>
+</html>
