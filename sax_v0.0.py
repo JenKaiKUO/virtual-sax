@@ -221,3 +221,4 @@ finally:
         midi_out.note_off(current_note, 0)
     midi_out.close()
     pygame.midi.quit()
+
