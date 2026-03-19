@@ -19,7 +19,6 @@ https://jenkaikuo.github.io/virtual-sax/
 4. 晃動左手可產生抖音（Vibrato）效果 
 5. 點擊「🔴 MIDI 錄製」開始/停止錄音，系統會自動下載 .mid 檔案
 
-
 ---
 
 ## 🧠 使用技術
