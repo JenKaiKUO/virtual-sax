@@ -1,6 +1,5 @@
 // audio_engine.js
 
-// 🌟 終極解法：直接作為 ES 模組引入，不依賴全域 window 變數
 import { Midi } from 'https://esm.sh/@tonejs/midi';
 
 export class SaxEngine {
