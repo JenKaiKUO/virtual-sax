@@ -2,88 +2,121 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>虛擬薩克斯風</title>
+    
+    <script>var exports = {};</script>
+
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    
     <script src="https://cdn.jsdelivr.net/combine/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/browser/midiwriter.min.js"></script>
-
     <style>
         :root { --gold: #d4af37; --bg: #121212; --panel: #1e1e1e; --red: #ff4444; --green: #00ff00; }
+        
+        /* 🌟 核心修正：讓 body 高度綁定視窗，禁止捲動 */
         body { 
             font-family: 'PingFang TC', sans-serif; 
             background: var(--bg); color: white; margin: 0; 
             display: flex; flex-direction: column; align-items: center; 
-            min-height: 100vh; overflow-x: hidden;
+            height: 100vh; overflow: hidden; box-sizing: border-box;
         }
         
-        h1 { font-weight: 200; letter-spacing: 4px; color: var(--gold); margin: 15px 0; font-size: 24px; }
+        h1 { font-weight: 200; letter-spacing: 4px; color: var(--gold); margin: 10px 0; font-size: 22px; flex-shrink: 0; }
 
+        /* 🌟 核心修正：主佈局佔滿剩餘高度 */
         .main-layout { 
             display: flex; justify-content: center; gap: 15px; 
-            padding: 10px; width: 98%; max-width: 1150px; 
+            padding: 10px; width: 98%; max-width: 1200px; 
+            flex: 1; min-height: 0; box-sizing: border-box;
         }
 
-        .status-sidebar { flex: 0 0 180px; display: flex; flex-direction: column; gap: 10px; }
+        .status-sidebar { flex: 0 0 180px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
         
+        /* 🌟 核心修正：影片容器自適應大小 */
         .video-container { 
             flex: 1; position: relative; border-radius: 12px; overflow: hidden; 
-            box-shadow: 0 8px 25px rgba(0,0,0,0.6); background: #000; aspect-ratio: 4/3;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6); background: #000; 
+            display: flex; align-items: center; justify-content: center;
+            min-height: 0;
         }
 
         .control-panel { 
             flex: 0 0 240px; background: var(--panel); padding: 15px; border-radius: 12px; 
-            display: flex; flex-direction: column; gap: 15px; border: 1px solid #333;
+            display: flex; flex-direction: column; gap: 12px; border: 1px solid #333;
+            min-height: 0; overflow-y: auto; /* 確保小螢幕時控制面板內可滑動 */
         }
 
-        .monitor-card { background: var(--panel); padding: 12px; border-radius: 10px; border-left: 3px solid var(--gold); position: relative; }
+        .monitor-card { background: var(--panel); padding: 10px; border-radius: 10px; border-left: 3px solid var(--gold); position: relative; }
         .monitor-label { font-size: 11px; color: #888; margin-bottom: 3px; }
         
-        /* 雙音符顯示樣式 */
         .monitor-value { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
-        .note-main { font-size: 24px; font-weight: bold; color: var(--gold); }
-        .note-sub { font-size: 13px; color: #aaa; font-weight: 400; }
+        .note-main { font-size: 22px; font-weight: bold; color: var(--gold); }
+        .note-sub { font-size: 12px; color: #aaa; font-weight: 400; }
 
         #vibrato_canvas { position: absolute; bottom: 0; left: 0; width: 100%; height: 40px; pointer-events: none; }
-
-        #webcam { transform: rotateY(180deg); display: none; }
-        #output_canvas { transform: rotateY(180deg); width: 100%; height: 100%; display: block; object-fit: cover; }
-
-        .btn-record {
-            padding: 12px; border-radius: 8px; border: 1px solid var(--red);
-            background: rgba(255, 68, 68, 0.05); color: var(--red);
-            cursor: pointer; font-weight: bold; transition: 0.3s;
-            display: flex; align-items: center; justify-content: center; gap: 8px;
+        #webcam { display: none; }
+        
+        /* 🌟 確保畫布完美填滿容器但不變形 */
+        #output_canvas { 
+            transform: rotateY(180deg); 
+            max-width: 100%; max-height: 100%; 
+            object-fit: contain; 
         }
+
+        .btn-action {
+            padding: 10px; border-radius: 8px; border: 1px solid var(--gold);
+            background: rgba(212, 175, 55, 0.1); color: var(--gold);
+            cursor: pointer; font-weight: bold; transition: 0.3s;
+            display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; box-sizing: border-box;
+            font-size: 14px;
+        }
+        .btn-action:hover { background: var(--gold); color: #000; }
+
+        .btn-record { border-color: var(--red); color: var(--red); background: rgba(255, 68, 68, 0.05); }
         .btn-record.recording { background: var(--red); color: white; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
 
-        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        .control-group { display: flex; flex-direction: column; gap: 6px; }
+        .control-group label { font-size: 13px; font-weight: bold; }
         .switch-item { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
 
         input[type=range] { width: 100%; accent-color: var(--gold); cursor: pointer; }
         input[type=checkbox] { cursor: pointer; width: 16px; height: 16px; accent-color: var(--gold); }
+        select { width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px; font-size: 13px; }
 
         #loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .btn-start { padding: 12px 40px; font-size: 16px; cursor: pointer; background: transparent; border: 2px solid var(--gold); border-radius: 25px; color: var(--gold); transition: 0.3s; }
+        .btn-start { padding: 12px 40px; font-size: 16px; cursor: pointer; background: transparent; border: 2px solid var(--gold); border-radius: 25px; color: var(--gold); transition: 0.3s; margin: 10px; }
+        .btn-start:hover { background: var(--gold); color: #000; }
+        
         .status-playing { color: var(--green); }
         .status-waiting { color: var(--red); }
-        hr { border: 0; border-top: 1px solid #333; margin: 2px 0; }
+        hr { border: 0; border-top: 1px solid #333; margin: 5px 0; }
+
+        #easy-progress-bar { width: 100%; height: 10px; background: #444; border-radius: 5px; overflow: hidden; margin-top: 10px; }
+        #easy-progress-fill { height: 100%; width: 0%; background: var(--gold); transition: width 0.1s; }
     </style>
 </head>
 <body>
 
     <div id="loading-overlay">
         <h2 style="font-weight: 200; color:var(--gold)">🎷 SAXOPHONE WORKSTATION</h2>
-        <p id="status-text">載入即時分析系統...</p>
+        <div id="mode-selection">
+            <h3 style="text-align: center; color: #aaa;">請選擇演奏模式</h3>
+            <button class="btn-start" id="btn-normal-mode">NORMAL (真實指法與氣息)</button>
+            <button class="btn-start" id="btn-easy-mode">EASY (任意手指跟隨樂譜)</button>
+        </div>
+        <p id="status-text" style="display:none; margin-top: 20px;">載入系統中...</p>
         <button class="btn-start" id="start-btn" style="display:none;">開始演奏 (Start)</button>
     </div>
 
     <h1>VIRTUAL SAXOPHONE</h1> 
+    
     <div class="main-layout">
-        <div class="status-sidebar">
+        <div class="status-sidebar" id="normal-sidebar" style="display:none;">
             <div class="monitor-card">
                 <div class="monitor-label">當前音符</div>
                 <div id="note_display" class="monitor-value">
@@ -93,11 +126,11 @@
             </div>
             <div class="monitor-card">
                 <div class="monitor-label">氣息狀態</div>
-                <div id="mouth_status" class="status-waiting" style="font-size:18px; font-weight:bold;">等待中</div>
+                <div id="mouth_status" class="status-waiting" style="font-size:16px; font-weight:bold;">等待中</div>
             </div>
-            <div class="monitor-card" style="height: 80px;">
+            <div class="monitor-card" style="min-height: 80px;">
                 <div class="monitor-label">左手抖音</div>
-                <div id="vibrato_status" style="font-size:18px; font-weight:bold;">0%</div>
+                <div id="vibrato_status" style="font-size:20px; font-weight:bold;">0%</div>
                 <canvas id="vibrato_canvas"></canvas>
             </div>
         </div>
@@ -105,26 +138,27 @@
         <div class="video-container">
             <video id="webcam" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
+            
+            <div id="easy-overlay" style="display:none; position:absolute; bottom:20px; width:100%; text-align:center; background: rgba(0,0,0,0.5); padding: 10px 0;">
+                <div id="easy_status_msg" style="color:var(--gold); font-size:20px; font-weight:bold; text-shadow: 2px 2px 4px #000;">請選擇樂曲並開始</div>
+                <div style="width:60%; margin:10px auto 0;">
+                    <div id="easy-progress-bar"><div id="easy-progress-fill"></div></div>
+                </div>
+            </div>
         </div>
 
-        <div class="control-panel">
+        <div class="control-panel" id="normal-controls" style="display:none;">
             <div class="control-group">
                 <label>MIDI 錄製</label>
-                <button id="record_btn" class="btn-record">
+                <button id="record_btn" class="btn-action btn-record">
                     <span id="rec_dot">●</span> <span id="rec_text">開始錄製</span>
                 </button>
             </div>
             <hr>
             <div class="control-group">
                 <label>視覺提示</label>
-                <div class="switch-item">
-                    <span>手部提示線</span>
-                    <input type="checkbox" id="show_hands" checked>
-                </div>
-                <div class="switch-item">
-                    <span>氣息偵測點</span>
-                    <input type="checkbox" id="show_mouth" checked>
-                </div>
+                <div class="switch-item"><span>手部提示線</span><input type="checkbox" id="show_hands" checked></div>
+                <div class="switch-item"><span>氣息偵測點</span><input type="checkbox" id="show_mouth" checked></div>
             </div>
             <hr>
             <div class="control-group">
@@ -135,49 +169,183 @@
                 <label>主音量</label>
                 <input type="range" id="master_vol" min="0" max="200" value="120">
             </div>
+            <button class="btn-action" style="margin-top:auto;" onclick="location.reload()">切換模式</button>
+        </div>
+
+        <div class="control-panel" id="easy-controls" style="display:none;">
+            <div class="control-group">
+                <label style="color:var(--gold);">樂曲選擇</label>
+                <select id="midi-select"><option>載入中...</option></select>
+            </div>
+            <button id="easy-start-btn" class="btn-action">確定載入樂譜</button>
+            <hr>
+            <div class="control-group">
+                <p style="font-size:12px; color:#aaa; line-height:1.5;">
+                    💡 提示：<br>載入完成後，只要在鏡頭前<b>任意一根手指按下或放開</b>，即可觸發下一個音符。
+                </p>
+            </div>
+            <button class="btn-action" style="margin-top:auto;" onclick="location.reload()">切換模式</button>
         </div>
     </div>
 
-    <script>
-        const masterVol = document.getElementById('master_vol');
-        const vibSens = document.getElementById('vib_sens');
+    <script type="module">
+        import * as api from './midiapi.js';
+        import { SaxEngine } from './audio_engine.js';
+
+        let currentMode = null; 
         const videoElement = document.getElementById('webcam');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
-        const vibCanvas = document.getElementById('vibrato_canvas');
-        const vibCtx = vibCanvas.getContext('2d');
-        const noteDisplay = document.getElementById('note_display');
-        const mouthStatusDisplay = document.getElementById('mouth_status');
-        const vibratoStatusDisplay = document.getElementById('vibrato_status');
-        const showHandsCheck = document.getElementById('show_hands');
-        const showMouthCheck = document.getElementById('show_mouth');
+        
+        let camera = null;
+        let hands = null;
+        let faceMesh = null;
 
-        let isRecording = false;
-        let recordedNotes = [];
-        let activeNoteRecord = null;
-        let recordStartTime = 0;
-        let wavePoints = new Array(50).fill(0);
+        const uiNormalSidebar = document.getElementById('normal-sidebar');
+        const uiNormalControls = document.getElementById('normal-controls');
+        const uiEasyControls = document.getElementById('easy-controls');
+        const uiEasyOverlay = document.getElementById('easy-overlay');
+        const overlay = document.getElementById('loading-overlay');
+        const modeSelection = document.getElementById('mode-selection');
+        const statusText = document.getElementById('status-text');
+        const startBtn = document.getElementById('start-btn');
 
-        // --- 音名轉換工具 ---
-        function midiToNoteName(midi) {
-            if (!midi) return "-";
-            const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-            const octave = Math.floor(midi / 12) - 1;
-            const name = names[midi % 12];
-            return name + octave;
-        }
+        // ==========================================
+        // UI 切換與初始化邏輯
+        // ==========================================
+        document.getElementById('btn-normal-mode').onclick = () => {
+            currentMode = 'normal';
+            modeSelection.style.display = 'none';
+            statusText.style.display = 'block';
+            uiNormalSidebar.style.display = 'flex';
+            uiNormalSidebar.style.visibility = 'visible'; // 確保顯示
+            uiNormalControls.style.display = 'flex';
+            initNormalSound();
+        };
+
+        document.getElementById('btn-easy-mode').onclick = async () => {
+            currentMode = 'easy';
+            modeSelection.style.display = 'none';
+            overlay.style.display = 'none'; 
+            
+            // 🌟 核心修正：讓 Easy 模式也擁有左側欄位，但設定為隱藏以維持排版置中
+            uiNormalSidebar.style.display = 'flex';
+            uiNormalSidebar.style.visibility = 'hidden'; 
+            
+            uiEasyControls.style.display = 'flex';
+            uiEasyOverlay.style.display = 'block';
+            await initEasyMode();
+        };
 
         function resizeCanvas() {
-            canvasElement.width = canvasElement.clientWidth;
-            canvasElement.height = canvasElement.clientHeight;
-            vibCanvas.width = vibCanvas.clientWidth;
-            vibCanvas.height = vibCanvas.clientHeight;
+            canvasElement.width = videoElement.videoWidth || 640;
+            canvasElement.height = videoElement.videoHeight || 480;
+            if (currentMode === 'normal') {
+                const vibCanvas = document.getElementById('vibrato_canvas');
+                if(vibCanvas) {
+                    vibCanvas.width = vibCanvas.clientWidth;
+                    vibCanvas.height = vibCanvas.clientHeight;
+                }
+            }
         }
         window.addEventListener('resize', resizeCanvas);
 
+        // ==========================================
+        // EASY 模式專用邏輯
+        // ==========================================
+        const easySax = new SaxEngine();
+        let easyHandsState = [[false, false, false, false], [false, false, false, false]];
+        let easyLastTriggerTime = 0;
+        const DEBOUNCE_MS = 50;
+
+        async function initEasyMode() {
+            const list = await api.fetchMidiList();
+            const select = document.getElementById("midi-select");
+            select.innerHTML = '<option value="">-- 請選擇樂曲 --</option>';
+            list.forEach(i => select.add(new Option(i.title || i.filename, i.id)));
+            
+            initMediaPipe(false);
+        }
+
+        document.getElementById('easy-start-btn').onclick = async () => {
+            const id = document.getElementById("midi-select").value;
+            if (!id) return alert("請選取歌曲");
+
+            try {
+                document.getElementById("easy_status_msg").innerText = "⏳ 載入樂譜中...";
+                await easySax.init();
+                const buffer = await api.downloadMidiFile(id); 
+                
+                if (easySax.loadMidiData(buffer)) {
+                    document.getElementById("easy-progress-fill").style.width = "0%";
+                    document.getElementById("easy_status_msg").innerText = "🎷 準備就緒！請按下手指開始";
+                    
+                    if (!camera) {
+                        // 🌟 核心修正：Easy 模式統一使用 640x480 (4:3) 比例，避免變形
+                        camera = new Camera(videoElement, {
+                            onFrame: async () => { await hands.send({ image: videoElement }); },
+                            width: 640, height: 480
+                        });
+                        camera.start();
+                    }
+                }
+            } catch (e) {
+                document.getElementById("easy_status_msg").innerText = "❌ 載入失敗";
+            }
+        };
+
+        function processEasyLogic(results) {
+            let triggerNextNote = false;
+            const now = Date.now();
+
+            if (results.multiHandLandmarks) {
+                results.multiHandLandmarks.forEach((lm, handIndex) => {
+                    if (window.drawConnectors && window.drawLandmarks) {
+                        drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, { color: '#d4af37', lineWidth: 4 });
+                        drawLandmarks(canvasCtx, lm, { color: '#ffffff', fillColor: '#d4af37', lineWidth: 1, radius: 3 });
+                    }
+
+                    const tips = [8, 12, 16, 20];
+                    const pips = [6, 10, 14, 18];
+
+                    for (let i = 0; i < tips.length; i++) {
+                        const isCurrentlyDown = lm[tips[i]].y > lm[pips[i]].y + 0.05;
+                        if (isCurrentlyDown !== easyHandsState[handIndex][i]) {
+                            if (now - easyLastTriggerTime > DEBOUNCE_MS) {
+                                triggerNextNote = true;
+                                easyLastTriggerTime = now;
+                            }
+                            easyHandsState[handIndex][i] = isCurrentlyDown;
+                        }
+                    }
+                });
+            }
+
+            if (triggerNextNote) {
+                const progress = easySax.playNext();
+                if (progress >= 1) {
+                    document.getElementById("easy_status_msg").innerText = "✨ 演奏結束，太棒了！";
+                    document.getElementById("easy-progress-fill").style.width = "100%";
+                } else {
+                    document.getElementById("easy-progress-fill").style.width = (progress * 100) + "%";
+                    document.getElementById("easy_status_msg").innerText = "🎷 演奏中...";
+                }
+            }
+        }
+
+        // ==========================================
+        // NORMAL 模式專用邏輯
+        // ==========================================
         let audioCtx, saxPlayer, currentAudioNode;
         let lastLeftHandPos = { x: 0.5, y: 0.5 };
         let vibratoAmount = 0;
+        let wavePoints = new Array(50).fill(0);
+        let isRecording = false, recordedNotes = [], activeNoteRecord = null, recordStartTime = 0;
+        let currentNote = null, isMouthOpen = true;
+        let normalHandResults = null, normalFaceResults = null;
+
+        const masterVol = document.getElementById('master_vol');
+        const vibSens = document.getElementById('vib_sens');
 
         function getTimestamp() {
             const n = new Date();
@@ -185,16 +353,39 @@
             return `${n.getFullYear()}${f(n.getMonth()+1)}${f(n.getDate())}_${f(n.getHours())}${f(n.getMinutes())}`;
         }
 
-        async function initSound() {
+        async function initNormalSound() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             try {
                 saxPlayer = await Soundfont.instrument(audioCtx, 'alto_sax', { soundfont: 'MusicianStrings' });
-                document.getElementById('status-text').innerText = "系統已就緒";
-                document.getElementById('start-btn').style.display = "block";
-                resizeCanvas();
+                statusText.innerText = "系統已就緒";
+                startBtn.style.display = "block";
+                initMediaPipe(true);
             } catch (e) {
-                document.getElementById('status-text').innerText = "音色載入失敗";
+                statusText.innerText = "音色載入失敗";
             }
+        }
+
+        startBtn.onclick = () => {
+            audioCtx.resume();
+            overlay.style.display = 'none';
+            if (!camera) {
+                camera = new Camera(videoElement, {
+                    onFrame: async () => { 
+                        await hands.send({image: videoElement}); 
+                        if (faceMesh) await faceMesh.send({image: videoElement}); 
+                    },
+                    width: 640, height: 480
+                });
+                camera.start();
+            }
+        };
+
+        function midiToNoteName(midi) {
+            if (!midi) return "-";
+            const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const octave = Math.floor(midi / 12) - 1;
+            const name = names[midi % 12];
+            return name + octave;
         }
 
         function recordNoteOn(midi) {
@@ -240,7 +431,7 @@
                 }
             }
         };
-
+        
         function playNote(midi) {
             if (!saxPlayer) return;
             if (currentAudioNode) currentAudioNode.stop();
@@ -252,32 +443,14 @@
             if (currentAudioNode) { currentAudioNode.stop(); recordNoteOff(); currentAudioNode = null; }
         }
 
-        function drawVibWave() {
-            vibCtx.clearRect(0, 0, vibCanvas.width, vibCanvas.height);
-            vibCtx.beginPath();
-            vibCtx.strokeStyle = 'white';
-            const step = vibCanvas.width / 49;
-            for(let i=0; i<50; i++) {
-                const y = (vibCanvas.height/2) + Math.sin(Date.now()*0.02 + i*0.5) * (wavePoints[i]*15);
-                i === 0 ? vibCtx.moveTo(i*step, y) : vibCtx.lineTo(i*step, y);
-            }
-            vibCtx.stroke();
-        }
-
-        let currentNote = null, isMouthOpen = true, handResults = null, faceResults = null;
-
-        function updateLogic() {
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-
+        function processNormalLogic() {
             let L = { idx: false, mid: false, rng: false, pnk: false, thumb: false };
             let R = { idx: false, mid: false, rng: false, pnk: false };
 
-            if (handResults && handResults.multiHandLandmarks) {
-                handResults.multiHandLandmarks.forEach((landmarks, idx) => {
-                    const label = handResults.multiHandedness[idx].label;
-                    if (showHandsCheck.checked && typeof drawConnectors !== 'undefined') {
+            if (normalHandResults && normalHandResults.multiHandLandmarks) {
+                normalHandResults.multiHandLandmarks.forEach((landmarks, idx) => {
+                    const label = normalHandResults.multiHandedness[idx].label;
+                    if (document.getElementById('show_hands').checked && typeof drawConnectors !== 'undefined') {
                         drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#d4af37', lineWidth: 2});
                         drawLandmarks(canvasCtx, landmarks, {color: '#fff', lineWidth: 1, radius: 2});
                     }
@@ -301,10 +474,10 @@
             }
 
             let newIsMouthOpen = true;
-            if (faceResults && faceResults.multiFaceLandmarks?.[0]) {
-                const fm = faceResults.multiFaceLandmarks[0];
+            if (normalFaceResults && normalFaceResults.multiFaceLandmarks?.[0]) {
+                const fm = normalFaceResults.multiFaceLandmarks[0];
                 newIsMouthOpen = Math.abs(fm[13].y - fm[14].y) > 0.025;
-                if (showMouthCheck.checked) {
+                if (document.getElementById('show_mouth').checked) {
                     canvasCtx.fillStyle = newIsMouthOpen ? "rgba(255,255,255,0.3)" : "var(--gold)";
                     canvasCtx.beginPath();
                     canvasCtx.arc(fm[13].x * canvasElement.width, fm[13].y * canvasElement.height, 6, 0, Math.PI*2);
@@ -337,55 +510,58 @@
             }
 
             currentNote = nextNote; isMouthOpen = newIsMouthOpen;
-            wavePoints.push(vibratoAmount); wavePoints.shift(); drawVibWave();
             
-            // --- 更新顯示 ---
-            noteDisplay.querySelector('.note-main').innerText = nextNote ? midiToNoteName(nextNote) : "-";
-            noteDisplay.querySelector('.note-sub').innerText = nextNote ? `MIDI: ${nextNote}` : "MIDI: -";
+            const nName = nextNote ? midiToNoteName(nextNote) : "-";
+            document.querySelector('#note_display .note-main').innerText = nName;
+            document.querySelector('#note_display .note-sub').innerText = nextNote ? `MIDI: ${nextNote}` : "MIDI: -";
+            document.getElementById('mouth_status').innerText = isMouthOpen ? "等待中 (WAITING)" : "吹奏中 (PLAYING)";
+            document.getElementById('mouth_status').className = isMouthOpen ? "status-waiting" : "status-playing";
+            document.getElementById('vibrato_status').innerText = `${Math.round(vibratoAmount*100)}%`;
             
-            mouthStatusDisplay.innerText = isMouthOpen ? "等待中 (WAITING)" : "吹奏中 (PLAYING)";
-            mouthStatusDisplay.className = isMouthOpen ? "status-waiting" : "status-playing";
-            vibratoStatusDisplay.innerText = `${Math.round(vibratoAmount*100)}%`;
-            canvasCtx.restore();
+            const vibCanvas = document.getElementById('vibrato_canvas');
+            if(vibCanvas) {
+                const vibCtx = vibCanvas.getContext('2d');
+                wavePoints.push(vibratoAmount); wavePoints.shift();
+                vibCtx.clearRect(0, 0, vibCanvas.width, vibCanvas.height);
+                vibCtx.beginPath();
+                vibCtx.strokeStyle = 'white';
+                const step = vibCanvas.width / 49;
+                for(let i=0; i<50; i++) {
+                    const y = (vibCanvas.height/2) + Math.sin(Date.now()*0.02 + i*0.5) * (wavePoints[i]*15);
+                    i === 0 ? vibCtx.moveTo(i*step, y) : vibCtx.lineTo(i*step, y);
+                }
+                vibCtx.stroke();
+            }
         }
 
-        const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6 });
-        hands.onResults(res => { handResults = res; updateLogic(); });
-        
-        const faceMesh = new FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
-        faceMesh.onResults(res => { faceResults = res; });
+        // ==========================================
+        // 共用 MediaPipe 初始化
+        // ==========================================
+        function initMediaPipe(enableFaceMesh) {
+            hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6 });
+            
+            videoElement.addEventListener('loadeddata', resizeCanvas);
 
-        const camera = new Camera(videoElement, {
-            onFrame: async () => { 
-                await hands.send({image: videoElement}); 
-                await faceMesh.send({image: videoElement}); 
-            },
-            width: 640, height: 480
-        });
+            hands.onResults(res => {
+                canvasCtx.save();
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                canvasCtx.drawImage(res.image, 0, 0, canvasElement.width, canvasElement.height);
+                
+                if (currentMode === 'easy') {
+                    processEasyLogic(res);
+                } else if (currentMode === 'normal') {
+                    normalHandResults = res;
+                    processNormalLogic();
+                }
+                canvasCtx.restore();
+            });
 
-        document.getElementById('start-btn').onclick = () => {
-            audioCtx.resume();
-            document.getElementById('loading-overlay').style.display = 'none';
-            camera.start();
-        };
-
-        initSound();
+            if (enableFaceMesh) {
+                faceMesh = new FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+                faceMesh.onResults(res => { normalFaceResults = res; });
+            }
+        }
     </script>
 </body>
-</html><!-- v0.2 -->
-<!-- v0.3 -->
-<!-- v0.2 -->
-<!-- v0.3 -->
-<!-- v0.4 -->
-<!-- v0.6 -->
-<!-- v0.7 -->
-<!-- v0.8 -->
-<!-- v0.9 -->
-<!-- v0.2 -->
-<!-- v0.3 -->
-<!-- v0.4 -->
-<!-- v0.6 -->
-<!-- v0.7 -->
-<!-- v0.8 -->
-<!-- v0.9 -->
+</html>
