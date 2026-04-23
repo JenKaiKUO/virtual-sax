@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Saxophone AI</title>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script type="module" src="main.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    
+
+    <style>
+        /* 如果 style.css 報錯，先暫時把 CSS 寫在這裡測試 */
+        :root { --gold: #d4af37; --bg: #0d0d0d; }
+        body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; overflow: hidden; }
+        #settings-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; z-index: 1000; justify-content: center; align-items: center; }
+        .panel { background: #1a1a1a; padding: 30px; border-radius: 15px; border: 2px solid var(--gold); width: 340px; text-align: center; }
+        canvas { width: 100vw; height: 100vh; transform: rotateY(180deg); background: #000; object-fit: cover; }
+        .ui-panel { position: fixed; bottom: 40px; width: 100%; text-align: center; pointer-events: none; }
+        #status_msg { color: var(--gold); margin-bottom: 10px; font-weight: bold; }
+        .btn { padding: 12px 24px; background: var(--gold); border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; margin: 8px 0; }
+        select { width: 100%; padding: 10px; margin: 10px 0; background: #222; color: white; border: 1px solid var(--gold); }
+        .progress { width: 80%; margin: auto; height: 6px; background: #333; }
+        #progress-fill { height: 100%; width: 0%; background: var(--gold); transition: width 0.1s; }
+    </style>
+</head>
+<body>
+    <div id="settings-overlay">
+        <div class="panel">
+            <h2 style="color:var(--gold)">iMuse Saxophone</h2>
+            <select id="midi-select"><option value="">載入中...</option></select>
+            <button class="btn" onclick="handleStart()">確定並開始</button>
+        </div>
+    </div>
+
+    <canvas id="output_canvas"></canvas>
+    <video id="webcam" style="display:none" playsinline muted></video>
+
+    <div class="ui-panel">
+        <div id="status_msg">準備就緒</div>
+        <div class="progress"><div id="progress-fill"></div></div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+    <button onclick="backToMenu()" style="position:fixed; top:20px; right:20px; z-index:999; padding:8px 16px; background:rgba(212,175,55,0.8); border:none; border-radius:5px; color:black; font-weight:bold; cursor:pointer;">⚙️ 更換樂曲</button>
+
+
+</body>
+</html>
