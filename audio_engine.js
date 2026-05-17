@@ -12,11 +12,15 @@ export class SaxEngine {
         this.noteMap = new Map(); // 預處理音符，提升演奏效能
     }
 
-    async init() {
+    async init(instrument = "alto_sax", soundfont = "MusicianStrings") {
         if (!this.audioCtx) {
             this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            this.saxPlayer = await Soundfont.instrument(this.audioCtx, "alto_sax", { soundfont: 'MusicianStrings' });
         }
+        
+        // 每次調用 init 時都重新載入指定的音色
+        console.log(`🎷 正在載入音色: ${instrument} (${soundfont})...`);
+        this.saxPlayer = await Soundfont.instrument(this.audioCtx, instrument, { soundfont: soundfont });
+        
         if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
     }
 
