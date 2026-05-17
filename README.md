@@ -39,7 +39,7 @@ virtual-saxophone/
 ├── index.html          # Main entry point / 主頁面
 ├── audio_engine.js     # SaxEngine — Soundfont playback & MIDI sequencing / 音頻引擎
 ├── midiapi.js          # API helpers — fetch & download MIDI files / MIDI 資料存取
-└── README.md
+└── style.css
 ```
 
 ---
