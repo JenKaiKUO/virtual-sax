@@ -44,7 +44,7 @@ virtual-saxophone/
 
 ---
 
-## 🎮 How to Play — 遊玩方式
+## 🎮 How to Play — 使用方式
 
 ### Normal Mode — 真實指法模式
 
@@ -95,20 +95,6 @@ Hand and face are tracked simultaneously. / 同時追蹤雙手與臉部。
 | Instrument / 樂器 | Alto / Soprano / Tenor / Baritone Sax |
 | Soundfont / 音色庫 | MusicianStrings / FluidR3_GM / FatBoy |
 | Record button / 錄製按鈕 | Start/stop MIDI recording (Normal mode) / 開始或停止 MIDI 錄製（Normal 模式） |
-
----
-
-## 🛠️ Tech Stack — 技術棧
-
-| Library / 函式庫 | Purpose / 用途 |
-|---|---|
-| [MediaPipe Hands](https://google.github.io/mediapipe/solutions/hands) | Real-time 21-landmark hand tracking / 即時 21 點手部追蹤 |
-| [MediaPipe Face Mesh](https://google.github.io/mediapipe/solutions/face_mesh) | 468-landmark face tracking for breath detection / 468 點臉部追蹤，用於氣息偵測 |
-| [MediaPipe Camera Utils](https://www.npmjs.com/package/@mediapipe/camera_utils) | Webcam frame pipeline / 鏡頭畫面串流處理 |
-| [Soundfont Player](https://github.com/danigb/soundfont-player) | Web Audio API instrument synthesis / Web Audio 樂器音色合成 |
-| [MidiWriter.js](https://github.com/grimmdude/MidiWriterJS) | MIDI file export / MIDI 檔案匯出 |
-
-All libraries loaded via CDN — no `npm install` required. / 所有函式庫透過 CDN 載入，無需 `npm install`。
 
 ---
 
