@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>虛擬薩克斯風</title>
+    <title>虛擬薩克斯風 - 音色更新版</title>
     
     <script>var exports = {};</script>
 
@@ -17,7 +17,6 @@
     <style>
         :root { --gold: #d4af37; --bg: #121212; --panel: #1e1e1e; --red: #ff4444; --green: #00ff00; }
         
-        /* 🌟 核心修正：讓 body 高度綁定視窗，禁止捲動 */
         body { 
             font-family: 'PingFang TC', sans-serif; 
             background: var(--bg); color: white; margin: 0; 
@@ -27,7 +26,6 @@
         
         h1 { font-weight: 200; letter-spacing: 4px; color: var(--gold); margin: 10px 0; font-size: 22px; flex-shrink: 0; }
 
-        /* 🌟 核心修正：主佈局佔滿剩餘高度 */
         .main-layout { 
             display: flex; justify-content: center; gap: 15px; 
             padding: 10px; width: 98%; max-width: 1200px; 
@@ -36,7 +34,6 @@
 
         .status-sidebar { flex: 0 0 180px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
         
-        /* 🌟 核心修正：影片容器自適應大小 */
         .video-container { 
             flex: 1; position: relative; border-radius: 12px; overflow: hidden; 
             box-shadow: 0 8px 25px rgba(0,0,0,0.6); background: #000; 
@@ -60,7 +57,6 @@
         #vibrato_canvas { position: absolute; bottom: 0; left: 0; width: 100%; height: 40px; pointer-events: none; }
         #webcam { display: none; }
         
-        /* 🌟 確保畫布完美填滿容器但不變形 */
         #output_canvas { 
             transform: rotateY(180deg); 
             max-width: 100%; max-height: 100%; 
@@ -166,16 +162,59 @@
                 <input type="range" id="vib_sens" min="1" max="25" value="12">
             </div>
             <div class="control-group">
-                <label>主音量</label>
-                <input type="range" id="master_vol" min="0" max="200" value="120">
+                <label>音量</label>
+                <input type="range" id="master_vol" min="0" max="100" value="12">
             </div>
+            <hr>
+            <div class="control-group">
+                <label style="color:var(--gold);">音色設定</label>
+                <div class="switch-item">
+                    <span>樂器</span>
+                    <select id="normal-inst-select" style="width: 60%;">
+                        <option value="alto_sax">中音 (Alto Sax)</option>
+                        <option value="soprano_sax">高音 (Soprano Sax)</option>
+                        <option value="tenor_sax">次中音 (Tenor Sax)</option>
+                        <option value="baritone_sax">上低音 (Baritone Sax)</option>
+                    </select>
+                </div>
+                <div class="switch-item">
+                    <span>音色庫</span>
+                    <select id="normal-font-select" style="width: 60%;">
+                        <option value="MusicianStrings">MusicianStrings (輕快)</option>
+                        <option value="FluidR3_GM">FluidR3_GM (真實厚實)</option>
+                        <option value="FatBoy">FatBoy (明亮)</option>
+                    </select>
+                </div>
+            </div>
+            <hr>
             <button class="btn-action" style="margin-top:auto;" onclick="location.reload()">切換模式</button>
         </div>
 
         <div class="control-panel" id="easy-controls" style="display:none;">
             <div class="control-group">
                 <label style="color:var(--gold);">樂曲選擇</label>
-                <select id="midi-select"><option>載入中...</option></select>
+                <select id="midi-select"><option value="">-- 請選擇樂曲 --</option></select>
+            </div>
+            <div class="control-group">
+                <label style="color:var(--gold);">音色設定</label>
+                <!-- ✅ 補上這兩個 select，easy-start-btn 的 onclick 才不會報錯 -->
+                <div class="switch-item">
+                    <span>樂器</span>
+                    <select id="easy-inst-select" style="width: 60%;">
+                        <option value="alto_sax">中音 (Alto Sax)</option>
+                        <option value="soprano_sax">高音 (Soprano Sax)</option>
+                        <option value="tenor_sax">次中音 (Tenor Sax)</option>
+                        <option value="baritone_sax">上低音 (Baritone Sax)</option>
+                    </select>
+                </div>
+                <div class="switch-item">
+                    <span>音色庫</span>
+                    <select id="easy-font-select" style="width: 60%;">
+                        <option value="MusicianStrings">MusicianStrings (輕快)</option>
+                        <option value="FluidR3_GM">FluidR3_GM (真實厚實)</option>
+                        <option value="FatBoy">FatBoy (明亮)</option>
+                    </select>
+                </div>
             </div>
             <button id="easy-start-btn" class="btn-action">確定載入樂譜</button>
             <hr>
@@ -209,6 +248,20 @@
         const modeSelection = document.getElementById('mode-selection');
         const statusText = document.getElementById('status-text');
         const startBtn = document.getElementById('start-btn');
+
+        // 監聽 Normal 模式的音色更換
+        const updateNormalSound = async () => {
+        const inst = document.getElementById('normal-inst-select').value;
+        const font = document.getElementById('normal-font-select').value;
+            if (audioCtx) {
+                statusText.innerText = "更換音色中...";
+                saxPlayer = await Soundfont.instrument(audioCtx, inst, { soundfont: font });
+                statusText.innerText = "音色已更新";
+            }
+        };
+
+        document.getElementById('normal-inst-select').onchange = updateNormalSound;
+        document.getElementById('normal-font-select').onchange = updateNormalSound;
 
         // ==========================================
         // UI 切換與初始化邏輯
@@ -269,11 +322,16 @@
 
         document.getElementById('easy-start-btn').onclick = async () => {
             const id = document.getElementById("midi-select").value;
+            const inst = document.getElementById('easy-inst-select').value; // 抓取樂器
+            const font = document.getElementById('easy-font-select').value; // 抓取音色庫
+
             if (!id) return alert("請選取歌曲");
 
             try {
                 document.getElementById("easy_status_msg").innerText = "⏳ 載入樂譜中...";
-                await easySax.init();
+                // 傳入選定的音色參數
+                await easySax.init(inst, font);
+
                 const buffer = await api.downloadMidiFile(id); 
                 
                 if (easySax.loadMidiData(buffer)) {
@@ -281,7 +339,7 @@
                     document.getElementById("easy_status_msg").innerText = "🎷 準備就緒！請按下手指開始";
                     
                     if (!camera) {
-                        // 🌟 核心修正：Easy 模式統一使用 640x480 (4:3) 比例，避免變形
+                        // Easy 模式統一使用 640x480 (4:3) 比例，避免變形
                         camera = new Camera(videoElement, {
                             onFrame: async () => { await hands.send({ image: videoElement }); },
                             width: 640, height: 480
