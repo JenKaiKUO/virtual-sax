@@ -6,6 +6,13 @@ A browser-based virtual saxophone powered by **MediaPipe** hand/face tracking an
 
 ---
 
+## 🖥️ Demo
+
+https://jenkaikuo.github.io/virtual-sax/
+
+
+---
+
 ## ✨ Features — 功能特色
 
 - **Two play modes** — Normal (realistic fingering + breath detection) and Easy (any finger triggers the next note in a score)
@@ -22,13 +29,6 @@ A browser-based virtual saxophone powered by **MediaPipe** hand/face tracking an
   **MIDI 錄製** — 錄製演奏並下載為 `.mid` 檔（Normal 模式）
 - **Score follow** — load a MIDI file and advance note-by-note with finger gestures (Easy mode)
   **跟隨樂譜** — 載入 MIDI 檔，以手指動作逐音推進（Easy 模式）
-
----
-
-## 🖥️ Demo
-
-https://jenkaikuo.github.io/virtual-sax/
-
 
 ---
 
